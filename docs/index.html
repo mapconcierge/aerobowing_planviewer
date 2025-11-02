@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ドローンフライトプラン可視化</title>
+    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        .upload-panel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            text-align: center;
+            z-index: 1000;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .upload-panel.hidden {
+            display: none;
+        }
+
+        .upload-panel h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .upload-panel p {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .upload-area {
+            border: 3px dashed #4CAF50;
+            border-radius: 8px;
+            padding: 40px 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8fdf9;
+        }
+
+        .upload-area:hover {
+            border-color: #45a049;
+            background: #f0fdf4;
+        }
+
+        .upload-area.dragover {
+            border-color: #2196F3;
+            background: #e3f2fd;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 13px;
+            color: #999;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 300px;
+            z-index: 1;
+        }
+
+        .info-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 8px;
+        }
+
+        .info-item {
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #555;
+            display: inline-block;
+            min-width: 100px;
+        }
+
+        .info-value {
+            color: #333;
+        }
+
+        .reload-button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+            transition: background 0.3s;
+        }
+
+        .reload-button:hover {
+            background: #45a049;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+        }
+
+        .legend h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            margin-right: 8px;
+        }
+
+        .legend-marker {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .maplibregl-popup-content {
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .popup-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .popup-detail {
+            font-size: 13px;
+            margin: 4px 0;
+            color: #666;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="upload-panel" id="uploadPanel">
+        <h1>📁 フライトプランを読み込む</h1>
+        <p>.plan ファイルをドラッグ&ドロップするか、クリックして選択してください</p>
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📤</div>
+            <div class="upload-text">ファイルをドロップ</div>
+            <div class="upload-hint">または、クリックしてファイルを選択</div>
+        </div>
+        <input type="file" id="fileInput" accept=".plan">
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+    
+    <div class="info-panel" id="infoPanel" style="display: none;">
+        <h2>📊 フライト情報</h2>
+        <div class="info-item">
+            <span class="info-label">ファイル名:</span>
+            <span class="info-value" id="fileName">-</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">総ウェイポイント:</span>
+            <span class="info-value" id="totalWaypoints">-</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">サーベイポイント:</span>
+            <span class="info-value" id="surveyPoints">-</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">最大高度:</span>
+            <span class="info-value" id="maxAltitude">-</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">巡航速度:</span>
+            <span class="info-value" id="cruiseSpeed">-</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">カメラショット:</span>
+            <span class="info-value" id="cameraShots">-</span>
+        </div>
+        <button class="reload-button" onclick="reloadPage()">別のファイルを読み込む</button>
+    </div>
+
+    <div class="legend" id="legend" style="display: none;">
+        <h3>凡例</h3>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>飛行ルート</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #2196F3;"></div>
+            <span>サーベイルート</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-marker" style="background: #FF5722; border: 2px solid white;"></div>
+            <span>離陸地点</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-marker" style="background: #FFC107; border: 2px solid white;"></div>
+            <span>ウェイポイント</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-marker" style="background: #9C27B0; border: 2px solid white;"></div>
+            <span>着陸地点</span>
+        </div>
+    </div>
+
+    <script>
+        let map;
+        let markers = [];
+
+        // MapLibre GL JS マップの初期化
+        function initMap() {
+            map = new maplibregl.Map({
+                container: 'map',
+                style: 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json',
+                center: [139.9742306, 35.9301209],
+                zoom: 14,
+                pitch: 45,
+                bearing: 0
+            });
+
+            map.addControl(new maplibregl.NavigationControl(), 'top-left');
+            map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+        }
+
+        // ファイルアップロードの設定
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadPanel = document.getElementById('uploadPanel');
+        const errorMessage = document.getElementById('errorMessage');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.plan')) {
+                showError('.plan ファイルを選択してください');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const flightPlan = JSON.parse(e.target.result);
+                    loadFlightPlan(flightPlan, file.name);
+                    uploadPanel.classList.add('hidden');
+                    document.getElementById('infoPanel').style.display = 'block';
+                    document.getElementById('legend').style.display = 'block';
+                } catch (error) {
+                    showError('ファイルの読み込みに失敗しました: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+            setTimeout(() => {
+                errorMessage.classList.remove('show');
+            }, 5000);
+        }
+
+        function loadFlightPlan(flightPlan, fileName) {
+            // マップがまだ読み込まれていない場合は待機
+            if (!map.loaded()) {
+                map.on('load', () => visualizeFlightPlan(flightPlan, fileName));
+            } else {
+                visualizeFlightPlan(flightPlan, fileName);
+            }
+        }
+
+        function visualizeFlightPlan(flightPlan, fileName) {
+            // 既存のレイヤーとマーカーをクリア
+            clearMap();
+
+            // ウェイポイントの抽出
+            const waypoints = [];
+            const surveyPoints = [];
+            let surveyItem = null;
+
+            flightPlan.mission.items.forEach((item, index) => {
+                if (item.type === 'SimpleItem' && item.params && item.params[4] && item.params[5]) {
+                    waypoints.push({
+                        lat: item.params[4],
+                        lon: item.params[5],
+                        alt: item.params[6] || 0,
+                        command: item.command,
+                        index: index
+                    });
+                } else if (item.type === 'ComplexItem' && item.TransectStyleComplexItem) {
+                    surveyItem = item;
+                    const transect = item.TransectStyleComplexItem;
+                    if (transect.VisualTransectPoints) {
+                        transect.VisualTransectPoints.forEach(point => {
+                            surveyPoints.push({
+                                lat: point[0],
+                                lon: point[1],
+                                alt: transect.CameraCalc?.DistanceToSurface || 130
+                            });
+                        });
+                    }
+                }
+            });
+
+            // 情報パネルの更新
+            document.getElementById('fileName').textContent = fileName;
+            document.getElementById('totalWaypoints').textContent = waypoints.length;
+            document.getElementById('surveyPoints').textContent = surveyPoints.length;
+            document.getElementById('maxAltitude').textContent = 
+                waypoints.length > 0 ? Math.max(...waypoints.map(w => w.alt)) + 'm' : '-';
+            document.getElementById('cruiseSpeed').textContent = 
+                flightPlan.mission.cruiseSpeed + 'm/s';
+            document.getElementById('cameraShots').textContent = 
+                surveyItem?.TransectStyleComplexItem?.CameraShots || 0;
+
+            // 地図の中心を設定
+            if (flightPlan.mission.plannedHomePosition) {
+                const homePos = flightPlan.mission.plannedHomePosition;
+                map.flyTo({
+                    center: [homePos[1], homePos[0]],
+                    zoom: 14,
+                    essential: true
+                });
+            }
+
+            // フライトルートの描画
+            if (waypoints.length > 1) {
+                const routeCoordinates = waypoints
+                    .filter(w => w.command !== 530)
+                    .map(w => [w.lon, w.lat]);
+
+                if (routeCoordinates.length > 0) {
+                    map.addSource('route', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'LineString',
+                                coordinates: routeCoordinates
+                            }
+                        }
+                    });
+
+                    map.addLayer({
+                        id: 'route',
+                        type: 'line',
+                        source: 'route',
+                        paint: {
+                            'line-color': '#4CAF50',
+                            'line-width': 3,
+                            'line-opacity': 0.8
+                        }
+                    });
+                }
+            }
+
+            // サーベイルートの描画
+            if (surveyPoints.length > 0) {
+                const surveyCoordinates = surveyPoints.map(p => [p.lon, p.lat]);
+                
+                map.addSource('survey-route', {
+                    type: 'geojson',
+                    data: {
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: surveyCoordinates
+                        }
+                    }
+                });
+
+                map.addLayer({
+                    id: 'survey-route',
+                    type: 'line',
+                    source: 'survey-route',
+                    paint: {
+                        'line-color': '#2196F3',
+                        'line-width': 2,
+                        'line-opacity': 0.7,
+                        'line-dasharray': [2, 2]
+                    }
+                });
+
+                // サーベイポリゴンの描画
+                if (surveyItem && surveyItem.polygon) {
+                    map.addSource('survey-polygon', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Polygon',
+                                coordinates: [surveyItem.polygon.map(p => [p[1], p[0]])]
+                            }
+                        }
+                    });
+
+                    map.addLayer({
+                        id: 'survey-polygon',
+                        type: 'fill',
+                        source: 'survey-polygon',
+                        paint: {
+                            'fill-color': '#2196F3',
+                            'fill-opacity': 0.1
+                        }
+                    });
+
+                    map.addLayer({
+                        id: 'survey-polygon-outline',
+                        type: 'line',
+                        source: 'survey-polygon',
+                        paint: {
+                            'line-color': '#2196F3',
+                            'line-width': 2,
+                            'line-opacity': 0.5
+                        }
+                    });
+                }
+            }
+
+            // ウェイポイントマーカーの追加
+            waypoints.forEach((wp, index) => {
+                let color = '#FFC107';
+                let label = `WP${index}`;
+                
+                if (wp.command === 84) {
+                    color = '#FF5722';
+                    label = '離陸';
+                } else if (wp.command === 85) {
+                    color = '#9C27B0';
+                    label = '着陸';
+                }
+
+                const el = document.createElement('div');
+                el.style.width = '12px';
+                el.style.height = '12px';
+                el.style.borderRadius = '50%';
+                el.style.backgroundColor = color;
+                el.style.border = '2px solid white';
+                el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+                el.style.cursor = 'pointer';
+
+                const popup = new maplibregl.Popup({ offset: 15 })
+                    .setHTML(`
+                        <div class="popup-title">${label}</div>
+                        <div class="popup-detail">緯度: ${wp.lat.toFixed(6)}</div>
+                        <div class="popup-detail">経度: ${wp.lon.toFixed(6)}</div>
+                        <div class="popup-detail">高度: ${wp.alt}m</div>
+                    `);
+
+                const marker = new maplibregl.Marker(el)
+                    .setLngLat([wp.lon, wp.lat])
+                    .setPopup(popup)
+                    .addTo(map);
+
+                markers.push(marker);
+            });
+
+            // ホームポジションマーカー
+            if (flightPlan.mission.plannedHomePosition) {
+                const homePos = flightPlan.mission.plannedHomePosition;
+                const homeEl = document.createElement('div');
+                homeEl.innerHTML = '🏠';
+                homeEl.style.fontSize = '20px';
+                homeEl.style.cursor = 'pointer';
+
+                const homeMarker = new maplibregl.Marker(homeEl)
+                    .setLngLat([homePos[1], homePos[0]])
+                    .setPopup(new maplibregl.Popup().setHTML('<div class="popup-title">ホームポジション</div>'))
+                    .addTo(map);
+
+                markers.push(homeMarker);
+            }
+        }
+
+        function clearMap() {
+            // マーカーの削除
+            markers.forEach(marker => marker.remove());
+            markers = [];
+
+            // レイヤーとソースの削除
+            const layersToRemove = ['route', 'survey-route', 'survey-polygon', 'survey-polygon-outline'];
+            layersToRemove.forEach(layerId => {
+                if (map.getLayer(layerId)) {
+                    map.removeLayer(layerId);
+                }
+            });
+
+            const sourcesToRemove = ['route', 'survey-route', 'survey-polygon'];
+            sourcesToRemove.forEach(sourceId => {
+                if (map.getSource(sourceId)) {
+                    map.removeSource(sourceId);
+                }
+            });
+        }
+
+        function reloadPage() {
+            location.reload();
+        }
+
+        // 初期化
+        initMap();
+    </script>
+</body>
+</html>
